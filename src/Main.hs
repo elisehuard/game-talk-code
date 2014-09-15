@@ -3,7 +3,10 @@ import "GLFW-b" Graphics.UI.GLFW as GLFW
 import Graphics.Rendering.OpenGL hiding (Front)
 import System.Exit ( exitWith, ExitCode(ExitSuccess) )
 import Control.Concurrent (threadDelay)
-import Control.Monad (when)
+import Control.Applicative ((<$>))
+import Control.Monad (when, join)
+import Data.Function (fix)
+import FRP.Elerea.Simple
 
 data State = State { x :: GLdouble, y :: GLdouble }
 
@@ -18,31 +21,36 @@ main :: IO ()
 main = do
     let width  = 640
         height = 480
+    (directionKey, directionKeySink) <- external (False, False, False, False)
     withWindow width height "Game-Demo" $ \win -> do
           initGL width height
-          loop win initialState
-          exitWith ExitSuccess
-    where loop window state =  do
-            threadDelay 20000
-            pollEvents
-            k <- keyIsPressed window Key'Escape
-            l <- keyIsPressed window Key'Left
-            r <- keyIsPressed window Key'Right
-            u <- keyIsPressed window Key'Up
-            d <- keyIsPressed window Key'Down
-            let newState = movePlayer (l,r,u,d) state 10
-            renderFrame newState window
-            if k
-              then return ()
-              else loop window newState
+          network <- start $ do
+            state <- transfer initialState movePlayer directionKey
+            return $ renderFrame win <$> state
+          fix $ \loop -> do
+              readKeys win directionKeySink
+              join network
+              threadDelay 20000
+              esc <- keyIsPressed win Key'Escape
+              when (not esc) loop
+              exitWith ExitSuccess
 
-movePlayer (True, _, _, _) State { x = xpos, y = ypos } increment = State { x = xpos - increment, y = ypos }
-movePlayer (_, True, _, _) State { x = xpos, y = ypos } increment = State { x = xpos + increment, y = ypos }
-movePlayer (_, _, True, _) State { x = xpos, y = ypos } increment = State { x = xpos, y = ypos + increment }
-movePlayer (_, _, _, True) State { x = xpos, y = ypos } increment = State { x = xpos, y = ypos - increment }
-movePlayer (False, False, False, False) State { x = xpos, y = ypos } increment = State { x = xpos, y = ypos }
+readKeys window directionKeys = do
+    pollEvents
+    l <- keyIsPressed window Key'Left
+    r <- keyIsPressed window Key'Right
+    u <- keyIsPressed window Key'Up
+    d <- keyIsPressed window Key'Down
+    directionKeys (l, r, u, d)
 
-renderFrame State { x = xpos, y = ypos } window = do
+increment = 10
+movePlayer (True, _, _, _) State { x = xpos, y = ypos } = State { x = xpos - increment, y = ypos }
+movePlayer (_, True, _, _) State { x = xpos, y = ypos } = State { x = xpos + increment, y = ypos }
+movePlayer (_, _, True, _) State { x = xpos, y = ypos } = State { x = xpos, y = ypos + increment }
+movePlayer (_, _, _, True) State { x = xpos, y = ypos } = State { x = xpos, y = ypos - increment }
+movePlayer (False, False, False, False) State { x = xpos, y = ypos } = State { x = xpos, y = ypos }
+
+renderFrame window State { x = xpos, y = ypos } = do
    clear [ColorBuffer]
    color $ Color4 0 0 0 (1 :: GLfloat)
    let playerSize = (20 :: GLdouble)
